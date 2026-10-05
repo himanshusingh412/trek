@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import tailwindcss from '@tailwindcss/vite'
 import react from '@vitejs/plugin-react'
 import { defineConfig, loadEnv, type Plugin } from 'vite'
@@ -54,12 +56,37 @@ function requireApiBaseUrl(env: Record<string, string>): Plugin {
   }
 }
 
+/**
+ * The live site must not show placeholder legal details. A production build fails while src/lib/business.ts has a
+ * `[…]` value, unless ALLOW_PLACEHOLDER_BUSINESS_DETAILS=true is set deliberately (then it warns, loudly).
+ */
+function requireBusinessDetails(): Plugin {
+  return {
+    name: 'require-business-details',
+    apply: 'build',
+    configResolved(config) {
+      if (config.mode !== 'production') return
+      const source = readFileSync(resolve(config.root, 'src/lib/business.ts'), 'utf8')
+      const placeholders = [...source.matchAll(/^\s*(\w+):\s*'([^']*\[[^\]]+\][^']*)'/gm)].map((m) => m[1])
+      if (placeholders.length === 0) return
+      const problem = `src/lib/business.ts still has placeholder values: ${placeholders.join(', ')}`
+      if (process.env.ALLOW_PLACEHOLDER_BUSINESS_DETAILS === 'true') {
+        config.logger.warn(`\nWARNING: ${problem}. This build is NOT ready for launch or Razorpay review.\n`)
+        return
+      }
+      throw new Error(
+        `${problem}. Fill them in (docs/LAUNCH-READINESS.md), or set ALLOW_PLACEHOLDER_BUSINESS_DETAILS=true to build anyway.`,
+      )
+    },
+  }
+}
+
 // https://vite.dev/config/
 export default defineConfig(({ mode }) => {
   // VITE_* vars live in the repo-root .env alongside the backend's; real environment variables win.
   const envDir = '..'
   return {
-    plugins: [react(), tailwindcss(), preloadFirstHero(), requireApiBaseUrl(loadEnv(mode, envDir, 'VITE_'))],
+    plugins: [react(), tailwindcss(), preloadFirstHero(), requireApiBaseUrl(loadEnv(mode, envDir, 'VITE_')), requireBusinessDetails()],
     envDir,
   }
 })

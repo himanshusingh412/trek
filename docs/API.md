@@ -12,7 +12,8 @@ Every HTTP endpoint the backend serves, with a curl example, the request body an
   ```json
   { "code": "BOOKING_NOT_FOUND", "message": "Booking not found", "details": {} }
   ```
-  Validation errors are `400 VALIDATION_FAILED` with `details.fields` (`{"email": "must be a well-formed email address"}`). Common to every endpoint: `401 UNAUTHENTICATED`, `401 TOKEN_EXPIRED`, `403 FORBIDDEN`, `429 RATE_LIMITED` (`details.retry_after` seconds, `Retry-After` header).
+  Validation errors are `400 VALIDATION_FAILED` with `details.fields` (`{"email": "must be a well-formed email address"}`). Common to every endpoint: `401 UNAUTHENTICATED`, `401 TOKEN_EXPIRED`, `403 FORBIDDEN`, `429 RATE_LIMITED` (`details.retry_after` seconds, `Retry-After` header), `400 MALFORMED_REQUEST` (unreadable body), `405 METHOD_NOT_ALLOWED`, `415 UNSUPPORTED_MEDIA_TYPE`, `409 CONFLICT` / `409 CONCURRENT_UPDATE` (a change raced another; retry), `503 SERVICE_UNAVAILABLE` (database unreachable; `Retry-After`), `500 INTERNAL_ERROR` (`details.request_id`). Messages never contain SQL or exception text.
+- **Request id:** every response carries `X-Request-Id` (yours, if you send a well-formed one, else a new UUID). It's in every server log line for that request and in a 500's `details.request_id`.
 - **Rate limits** per IP per minute: 10 on signup/login/Google/OTP, 5 on guest bookings, 20 on account changes, 120 on everything else. Webhooks and health are exempt.
 
 Set these once in your shell for the examples:
@@ -148,6 +149,8 @@ Optional `acquisition` object on signup, OTP verify, Google sign-in and both boo
   "seats": 2,
   "price_paise_per_seat": 219900,
   "amount_paise": 439800,
+  "addons": { "insurance_seats": 2, "insurance_price_paise": 20000, "offloading_seats": 0, "offloading_price_paise": null,
+              "transport_seats": 0, "transport_price_paise": null, "total_paise": 40000 },
   "contact": { "full_name": "Asha Rao", "phone": "+919876543210", "email": "asha@example.com" },
   "travellers_complete": false,
   "hold_expires_at": "2026-09-16T10:30:00Z",
@@ -165,19 +168,20 @@ Optional `acquisition` object on signup, OTP verify, Google sign-in and both boo
     "guide": { "id": "…-uuid", "full_name": "Vikram Shinde", "avatar_url": null }
   },
   "travellers": [
-    { "full_name": "Asha Rao", "phone": "+919876543210", "date_of_birth": "1995-04-12", "gender": "FEMALE" }
+    { "full_name": "Asha Rao", "phone": "+919876543210", "date_of_birth": "1995-04-12", "gender": "FEMALE",
+      "insurance": true, "insurance_id": null, "offloading": false, "transport": false }
   ],
   "payment": { "…": "Payment" },
   "refunds": [],
   "refund_policy": [
-    { "min_days_before": 15, "refund_bps": 9000 },
-    { "min_days_before": 7, "refund_bps": 5000 },
+    { "min_days_before": 31, "refund_bps": 9000 },
+    { "min_days_before": 15, "refund_bps": 5000 },
     { "min_days_before": 0, "refund_bps": 0 }
   ],
   "created_at": "2026-09-16T10:20:00Z"
 }
 ```
-`status`: `HELD | CONFIRMED | EXPIRED | RELEASED | CANCELLED_BY_TREKKER | CANCELLED_FORCE_MAJEURE`. `refund_policy` is null until confirmed. A refund: `{ "id", "amount_paise", "status": "PENDING|PROCESSED|FAILED", "kind": "TREKKER_CANCELLATION|FORCE_MAJEURE|LATE_CAPTURE", "created_at" }`.
+`status`: `HELD | CONFIRMED | EXPIRED | RELEASED | CANCELLED_BY_TREKKER | CANCELLED_FORCE_MAJEURE`. `amount_paise` = trek fee + `addons.total_paise`; the add-on counts come from the travellers (each traveller's `insurance` = ours, `insurance_id` = their own policy instead). `refund_policy` is null until confirmed. A refund: `{ "id", "amount_paise", "status": "PENDING|PROCESSED|FAILED", "kind": "TREKKER_CANCELLATION|FORCE_MAJEURE|LATE_CAPTURE", "created_at" }`.
 
 ### Payment
 ```json
@@ -233,7 +237,7 @@ Optional `acquisition` object on signup, OTP verify, Google sign-in and both boo
 ## Health
 
 ### GET `/api/public/health`
-Server and database health. Used by the load balancer and uptime checks.
+Server and database health. Used by the load balancer and uptime checks. Never cached.
 ```bash
 curl $API/api/public/health
 ```
@@ -241,6 +245,7 @@ curl $API/api/public/health
 ```json
 { "status": "ok", "database": "up", "server_time": "2026-09-19T09:25:44Z" }
 ```
+`503` when the database can't be reached: `{ "status": "degraded", "database": "down", "server_time": "…" }`. Spring's probes: `/actuator/health/liveness` (process up) and `/actuator/health/readiness` (includes the database), both `{"status":"UP"}` with no details.
 
 ---
 
@@ -280,7 +285,7 @@ curl -X POST $API/api/auth/otp/request -H 'Content-Type: application/json' -d '{
 ```json
 { "expires_in": 300, "resend_after": 30 }
 ```
-Errors: `400 VALIDATION_FAILED`, `429 OTP_RATE_LIMITED` (`details.retry_after`), `503 SMS_UNAVAILABLE`. In dev the code is printed in the backend log.
+Errors: `400 VALIDATION_FAILED`, `429 OTP_RATE_LIMITED` (`details.retry_after`), `503 SMS_UNAVAILABLE` (MSG91 failed, or `SMS_PROVIDER=disabled`: no code is created). With `SMS_PROVIDER=log` (development only) the code is printed in the backend log.
 
 ### POST `/api/auth/otp/verify`
 Signs in with the code. An unknown number gets a new account (`full_name` optional). Optional `acquisition` ([Acquisition](#acquisition)).
@@ -572,7 +577,7 @@ curl -c jar.txt -X POST $API/api/public/bookings -H 'Content-Type: application/j
 Errors: `400 VALIDATION_FAILED`, `404 DEPARTURE_NOT_FOUND`, `409 DEPARTURE_NOT_BOOKABLE`, `409 NOT_ENOUGH_SEATS` (`details.seats_left`).
 
 ### POST `/api/trekker/bookings`
-Holds 1–10 seats for a signed-in trekker. Contact fields left out come from the account. Travellers are optional now; if given, exactly `seats` of them (each 18–100 years old on the start date). Optional `acquisition` ([Acquisition](#acquisition)).
+Holds 1–10 seats for a signed-in trekker. Contact fields left out come from the account. Travellers are optional now; if given, exactly `seats` of them (each 12–100 on the start date; anyone under 18 needs an adult on the same booking), each with optional add-ons `insurance`, `insurance_id`, `offloading`, `transport`. There is no booking-level `addons` field. Optional `acquisition` ([Acquisition](#acquisition)).
 ```bash
 curl -X POST $API/api/trekker/bookings -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
   -d '{"departure_id":"<departure-id>","seats":2,
@@ -597,14 +602,14 @@ curl $API/api/trekker/bookings/<booking-id> -H "Authorization: Bearer $TOKEN"
 `200` Booking. Errors: `404 BOOKING_NOT_FOUND`.
 
 ### PUT `/api/trekker/bookings/{id}/travellers`
-Replaces the traveller list (exactly `seats` entries). Allowed on `HELD` or `CONFIRMED` bookings before the start date.
+Replaces the traveller list (exactly `seats` entries, each with its add-ons). Allowed on `HELD` or `CONFIRMED` bookings before the start date. While held it reprices the booking (an open order for the old amount expires); once paid the add-on counts can't change.
 ```bash
 curl -X PUT $API/api/trekker/bookings/<booking-id>/travellers -H "Authorization: Bearer $TOKEN" \
   -H 'Content-Type: application/json' \
-  -d '{"travellers":[{"full_name":"Asha Rao","date_of_birth":"1995-04-12","gender":"FEMALE"},
-                    {"full_name":"Ravi Rao","date_of_birth":"1992-01-03","gender":"MALE"}]}'
+  -d '{"travellers":[{"full_name":"Asha Rao","date_of_birth":"1995-04-12","gender":"FEMALE","insurance":true},
+                    {"full_name":"Ravi Rao","date_of_birth":"1992-01-03","gender":"MALE","insurance_id":"POL-123"}]}'
 ```
-`200` Booking (`travellers_complete: true`). Errors: `400 VALIDATION_FAILED`, `404 BOOKING_NOT_FOUND`, `409 TRAVELLERS_LOCKED`.
+`200` Booking (`travellers_complete: true`). Errors: `400 VALIDATION_FAILED` (e.g. `travellers[0].insurance` when the trek doesn't offer it), `404 BOOKING_NOT_FOUND`, `409 TRAVELLERS_LOCKED`, `409 ADDONS_LOCKED`.
 
 ### DELETE `/api/trekker/bookings/{id}/hold`
 Releases a hold before paying; the seats go back on sale.
@@ -614,7 +619,7 @@ curl -X DELETE $API/api/trekker/bookings/<booking-id>/hold -H "Authorization: Be
 `200` Booking (`RELEASED`). Errors: `404 BOOKING_NOT_FOUND`, `409 BOOKING_NOT_HELD`.
 
 ### GET `/api/trekker/bookings/{id}/cancellation-quote`
-What cancelling now would refund (90% at 15+ days, 50% at 7–14, 0% at 1–6, not allowed on or after the start).
+What cancelling now would refund under the booking's frozen tiers (defaults: 90% at 31+ days, 50% at 15–30, 0% at 1–14, not allowed on or after the start).
 ```bash
 curl $API/api/trekker/bookings/<booking-id>/cancellation-quote -H "Authorization: Bearer $TOKEN"
 ```
@@ -657,7 +662,7 @@ curl -X POST $API/api/trekker/payments/orders -H "Authorization: Bearer $TOKEN" 
   "prefill": { "name": "Asha Rao", "email": "asha@example.com", "contact": "+919876543210" }
 }
 ```
-Errors: `400 VALIDATION_FAILED`, `404 BOOKING_NOT_FOUND`, `409 BOOKING_NOT_PAYABLE`, `502 GATEWAY_UNAVAILABLE` (also when Razorpay keys aren't set).
+Errors: `400 VALIDATION_FAILED`, `404 BOOKING_NOT_FOUND`, `409 BOOKING_NOT_PAYABLE`, `409 TRAVELLERS_NEEDED` (the trek offers insurance and not every seat is named and covered), `502 GATEWAY_UNAVAILABLE` (also when Razorpay keys aren't set). Only `key_id` (public) reaches the browser; the key secret and webhook secret never leave the server.
 
 ### POST `/api/trekker/payments/{id}/verify`
 Checks the signature Checkout returned and records the payment. `{id}` is our `payment_id`.

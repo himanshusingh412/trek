@@ -28,7 +28,13 @@ npm --prefix frontend run lint
 | `VITE_GOOGLE_CLIENT_ID` | your OAuth client ID | same, set as a GitHub variable for the deploy build |
 | `VITE_PHONE_OTP` | `true` to try phone OTP (codes appear in the backend log) | unset until SMS delivers (DLT, `docs/DEPLOY.md`); then `true` |
 
-Vite bakes these in at build time, so changing them needs a rebuild.
+Vite bakes these in at build time, so changing them needs a rebuild. Everything `VITE_` ends up in public JavaScript:
+never put a secret there (the Razorpay key id comes from the backend with each order; the secret never leaves it).
+
+A production build (`npm run build`) fails when `VITE_API_BASE_URL` isn't set (`''` is allowed for same-origin; plain
+http only for localhost), and while `src/lib/business.ts` still has `[…]` placeholders unless
+`ALLOW_PLACEHOLDER_BUSINESS_DETAILS=true` (`vite.config.ts`). Only the dev server falls back to `http://localhost:8081`.
+All variables: `docs/ENVIRONMENT.md`.
 
 ## Code layout
 | Folder | What's in it |
@@ -64,7 +70,8 @@ Vite bakes these in at build time, so changing them needs a rebuild.
 - Every call goes through `apiFetch` in `src/api/client.ts`. It sends JSON (or `FormData` as-is), adds `Authorization: Bearer`, and throws `ApiError` with the backend's `status`, `code`, `message` and `details`.
 - Signed-in calls go through `withAuth` from `useAuth()`. It passes the current access token and, on `TOKEN_EXPIRED`, refreshes once and retries.
 - Wrap reads in TanStack Query (`useQuery`) and writes in `useMutation`, then invalidate the affected queries.
-- Show errors with `messageFor(error)` and field errors with `fieldErrors(error)` from `auth/errorMessages.ts`. When the backend adds an error code, add its wording there.
+- Show errors with `messageFor(error)` and field errors with `fieldErrors(error)` from `auth/errorMessages.ts`. When the backend adds an error code, add its wording there. `apiFetch` turns a non-JSON error (a proxy's 502/503/504 page) into `SERVICE_UNAVAILABLE`; an `INTERNAL_ERROR` message ends with a short reference from the server's request id.
+- A page that throws while rendering, or whose code fails to load, shows `pages/RouteErrorPage.tsx` (the router's `errorElement`) instead of a blank screen.
 
 ## Sessions
 - The access token is kept **in memory only**, never in localStorage, so it dies with the tab.

@@ -5,14 +5,39 @@ A guide-led trekking marketplace: catalog, bookings, and Razorpay payments.
 - Backend: Java 21, Spring Boot, PostgreSQL 16 (Flyway-managed schema)
 - Frontend: React 19, TypeScript, Vite, Tailwind CSS v4
 
-See [`docs/TRD.md`](docs/TRD.md) for the full technical design (stack, schema, conventions, feature log), and [`docs/API.md`](docs/API.md), [`docs/BACKEND.md`](docs/BACKEND.md), [`docs/FRONTEND.md`](docs/FRONTEND.md), [`docs/DEPLOY.md`](docs/DEPLOY.md) for the rest.
+See [`docs/TRD.md`](docs/TRD.md) for the full technical design (stack, schema, conventions, feature log), and [`docs/API.md`](docs/API.md), [`docs/BACKEND.md`](docs/BACKEND.md), [`docs/FRONTEND.md`](docs/FRONTEND.md), [`docs/DEPLOY.md`](docs/DEPLOY.md) for the rest. Every environment variable, per environment: [`docs/ENVIRONMENT.md`](docs/ENVIRONMENT.md). What the owner must still provide before launch: [`docs/LAUNCH-READINESS.md`](docs/LAUNCH-READINESS.md).
+
+## How it fits together
+
+```
+Browser (React SPA, Firebase Hosting in prod)
+   │  HTTPS + JSON, Bearer access token, httpOnly refresh cookie
+   ▼
+Spring Boot API (ECS Fargate behind an ALB in prod) ──► PostgreSQL 16 (RDS in prod; Flyway migrations)
+   ├─► Razorpay (orders, payment checks, refunds) ◄── Razorpay webhooks (HMAC-verified)
+   ├─► SES (email) · MSG91 (OTP SMS, once DLT is approved) · S3 (photos)
+   └─► Google (verifies "Sign in with Google" tokens)
+```
 
 ## Prerequisites
 
-- [Docker](https://www.docker.com/) (for the local Postgres database)
+- [Docker](https://www.docker.com/) (for the local Postgres database and the backend tests). Docker Desktop works; on a
+  Mac without it, Colima does too (see below).
 - Java 21
 - Node.js 20+ and npm
 - `backend/mvnw` is checked in — no separate Maven install needed
+
+On macOS with Homebrew, without Docker Desktop:
+
+```bash
+brew install openjdk@21 colima docker docker-compose
+colima start --cpu 4 --memory 6
+export JAVA_HOME=/opt/homebrew/opt/openjdk@21 PATH="/opt/homebrew/opt/openjdk@21/bin:$PATH"
+export DOCKER_HOST="unix://$HOME/.colima/default/docker.sock" TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE=/var/run/docker.sock
+```
+
+Put the two `export` lines in `~/.zshrc` to keep them. With Colima, `docker-compose up -d` replaces `docker compose up -d`
+unless you register the compose plugin.
 
 ## 1. Clone and configure
 
@@ -22,7 +47,7 @@ cd trek
 cp .env.example .env
 ```
 
-Open `.env` and fill in the values you need. The defaults work for local development as-is; everything else (`RAZORPAY_*`, `GOOGLE_CLIENT_ID`, `MSG91_*`, etc.) can stay blank for local dev — those integrations fall back to `log` providers that just print to the console instead of calling a real provider. Never commit `.env`.
+Open `.env` and fill in the values you need. The defaults work for local development as-is (`APP_ENV=development`); everything else (`RAZORPAY_*`, `GOOGLE_CLIENT_ID`, `MSG91_*`, etc.) can stay blank for local dev. Email and SMS use `log` providers that print to the console instead of sending — development only: with `APP_ENV=staging` or `production` the backend refuses to start on them, and on any other development default (docs/ENVIRONMENT.md). For payments locally, use Razorpay **test** keys (`rzp_test_…`); live keys are refused outside production. Never commit `.env`.
 
 ## 2. Start the database
 
@@ -39,7 +64,7 @@ cd backend
 ./mvnw spring-boot:run
 ```
 
-The API starts on `http://localhost:8081`. It reads `.env` from the repo root automatically (see `backend/src/main/resources/application.yml`) and applies Flyway migrations on startup.
+The API starts on `http://localhost:8081`. It reads `.env` from the repo root automatically (see `backend/src/main/resources/application.yml`) and applies Flyway migrations on startup. Check it with `curl http://localhost:8081/api/public/health` (`503` with `"database":"down"` means Postgres isn't reachable).
 
 Run backend tests (needs Docker for Testcontainers):
 
@@ -61,7 +86,8 @@ The app starts on `http://localhost:5173` and talks to the backend at `VITE_API_
 Other useful frontend commands:
 
 ```bash
-npm run build   # tsc + vite build
+npm run build   # tsc + vite build (needs VITE_API_BASE_URL, e.g. from .env; placeholders in src/lib/business.ts
+                #  fail it unless ALLOW_PLACEHOLDER_BUSINESS_DETAILS=true)
 npm run lint    # oxlint
 ```
 

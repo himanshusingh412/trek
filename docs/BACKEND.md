@@ -18,7 +18,7 @@ cd backend && ./mvnw spring-boot:run              # http://localhost:8081
 cd backend && ./mvnw test                         # needs Docker running
 docker build -t sahyatri-backend backend          # production image
 ```
-Config comes from environment variables, with the repo-root `.env` read automatically in dev. Every variable is listed in `.env.example`. With no keys set, email and SMS are printed to the log, uploads go to `./data/uploads`, and paying returns `GATEWAY_UNAVAILABLE`.
+Config comes from environment variables, with the repo-root `.env` read automatically in dev. Every variable is listed in `.env.example` and, per environment, in `docs/ENVIRONMENT.md`. With no keys set (`APP_ENV=development`), email and SMS are printed to the log, uploads go to `./data/uploads`, and paying returns `GATEWAY_UNAVAILABLE`. With `APP_ENV=staging` or `production`, `common/config/DeploymentGuard` stops the start, before the database is touched, on any missing or development setting, listing names (never values) as Missing or Invalid.
 
 ## Code layout
 Feature first, then layer: `com.sahyatri.<feature>.{controller,service,repository,entity,dto}`. Code shared across features lives in `common`.
@@ -46,7 +46,7 @@ Feature first, then layer: `com.sahyatri.<feature>.{controller,service,repositor
 2. Spring Security checks the JWT and role (`SecurityConfig`); public, auth and webhook routes skip it.
 3. A thin controller validates the body (Bean Validation on DTO records) and calls a service.
 4. The service does the work: ownership checks from the JWT subject, row locks, state changes, audit records, domain events.
-5. Errors are thrown as `ApiException` and rendered as `{ code, message, details }`.
+5. Errors are thrown as `ApiException` and rendered as `{ code, message, details }`. Framework and database failures map to 4xx/409/503 codes in `GlobalExceptionHandler`; a 500 carries `details.request_id` (also the `X-Request-Id` header and in every log line).
 
 ## Rules the code must keep
 These come from the product laws in TRD §5. Where possible they're enforced by a database constraint as well as the service.
@@ -70,6 +70,14 @@ One Flyway file per feature in `src/main/resources/db/migration`. Never edit one
 | `V6__trek_page.sql` | route facts, `track_itinerary_days` |
 | `V7__trekker_profile_details.sql` | height, weight, diet, allergies, altitude, shoe size |
 | `V8__track_photos.sql` | trek photos |
+| `V9__track_catalog.sql` | `tracks.listed` |
+| `V10__trek_content.sql` | trek page facts, `trek_content_items`, `snow_reports`, `guide_profiles`, `reviews` |
+| `V11__acquisition.sql` | sign-up and booking attribution, marketing consent, last seen |
+| `V12__guide_courses.sql` | BMC/AMC course details on `guide_profiles` |
+| `V13__snowfall.sql` | `snow_reports.snowfall` |
+| `V14__booking_addons.sql` | add-on prices on tracks, add-on counts and totals on bookings |
+| `V15__traveller_addons.sql` | per-traveller add-ons (insurance or own policy, offloading, transport) |
+| `V16__password_reset.sql` | `password_resets` |
 
 Full column lists are in TRD §6.
 
@@ -97,8 +105,9 @@ Both run in every backend copy. Keep production at one copy until ShedLock is ad
 | Variable | Values | Effect |
 |---|---|---|
 | `STORAGE_TYPE` | `local` / `s3` | Where uploads go (`UPLOAD_DIR` or `S3_UPLOADS_BUCKET`) |
-| `MAIL_PROVIDER` | `log` / `ses` | Email printed or sent through SES from `MAIL_FROM` |
-| `SMS_PROVIDER` | `log` / `msg91` | OTP printed or sent through MSG91 |
+| `APP_ENV` | `development` / `staging` / `production` | Deployed values refuse development defaults at startup |
+| `MAIL_PROVIDER` | `log` (development only) / `ses` | Email printed or sent through SES from `MAIL_FROM` |
+| `SMS_PROVIDER` | `log` (development only) / `msg91` / `disabled` | OTP printed, sent through MSG91, or refused with `503 SMS_UNAVAILABLE` (no code created) |
 | `RATE_LIMIT_ENABLED` | `true` / `false` | The per-IP limiter (limits in `application.yml` under `app.rate-limit`) |
 | `RATE_LIMIT_CLIENT_IP_HEADER` | blank / `X-Forwarded-For` behind the ALB (last entry only), `CloudFront-Viewer-Address` on CloudFront | Where the real client IP comes from |
 | `AUTH_COOKIE_SECURE` | `false` dev / `true` prod | `Secure` flag on the refresh cookie |
@@ -116,6 +125,8 @@ Every API test extends `auth/AuthTestSupport`, which shares one Spring context a
 | `BookingTests`, `GuestCheckoutTests`, `SeatConcurrencyTests`, `CancellationTests` | Holds, seats under concurrency, cancellations, force majeure |
 | `PaymentTests`, `WebhookTests` | Signatures, races, reconciler, refunds |
 | `BookingNotificationTests` | Booking emails after commit |
+| `DeploymentGuardTests`, `SmsSenderTests` | Startup configuration check per environment; SMS providers |
+| `GlobalExceptionHandlerTests`, `RequestIdFilterTests`, `HealthControllerTests`, `RateLimitFilterTests` | Error bodies and codes, request ids, health, rate limits |
 
 ## Adding a feature
 1. Read the relevant TRD section; add the new schema, endpoints and screens to it in the same change.

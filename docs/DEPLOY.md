@@ -33,9 +33,11 @@ the refresh cookie set by `api.` is still first-party. Run the CLI snippets in *
 | AWS Activate credits | aws.amazon.com/activate | Not applied yet. Apply with the Workspace email now the site is live |
 | Firebase Blaze plan | Firebase console → Usage and billing | Still on Spark. Switch before promoting the site (`DEPLOY-FRONTEND-FIREBASE.md` B1) |
 
-Until DLT is approved, the backend runs `SMS_PROVIDER=log` and the build leaves `VITE_PHONE_OTP` unset, so the site
-hides phone sign-in and people use Google or email. Once MSG91 delivers, set `SMS_PROVIDER=msg91` and add the
-GitHub variable `VITE_PHONE_OTP=true` (passed to the build in `deploy.yml`).
+Until DLT is approved, the backend runs `SMS_PROVIDER=disabled` (OTP requests answer `503 SMS_UNAVAILABLE`; no code
+is created or logged — `log` is refused once `APP_ENV=production` is set) and the build leaves `VITE_PHONE_OTP` unset,
+so the site hides phone sign-in and people use Google or email. Once MSG91 delivers, set `SMS_PROVIDER=msg91` with
+`MSG91_AUTH_KEY` and `MSG91_OTP_TEMPLATE_ID`, and add the GitHub variable `VITE_PHONE_OTP=true` (passed to the build in
+`deploy.yml`).
 
 ## 1. AWS account hygiene
 1. Enable **MFA on the root user**, then stop using root. Create a user in **IAM Identity Center** with
@@ -167,6 +169,8 @@ The Dockerfile's build stage runs on `--platform=$BUILDPLATFORM`. Emulating amd6
 - **Secrets** (`valueFrom`): `JWT_SECRET` from `emptyvalley/prod` and `DB_PASSWORD` from the RDS secret's `password`
   key. Once you have them, add `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`, `RAZORPAY_WEBHOOK_SECRET` and
   `MSG91_AUTH_KEY` from `emptyvalley/prod`.
+- **All variables, per environment:** docs/ENVIRONMENT.md. Startup refuses missing or development values and
+  says which (names only).
 - **Rolling out `APP_ENV` (one-time):** set `APP_ENV=production` **and** `SMS_PROVIDER=disabled` in the same
   new task-definition revision. Until `APP_ENV` is set, the instance runs as `development` and only logs a warning.
   A start that fails the check exits before Flyway runs; the circuit breaker keeps the old task serving.
@@ -307,6 +311,7 @@ refused. One-time setup:
    | `GCP_WORKLOAD_IDENTITY_PROVIDER` | printed by step 2 |
    | `GCP_SERVICE_ACCOUNT` | printed by step 2 |
    | `VITE_PHONE_OTP` | not set (phone sign-in hidden); `true` once SMS delivers |
+   | `ALLOW_PLACEHOLDER_BUSINESS_DETAILS` | `true` **only** while `frontend/src/lib/business.ts` still has `[…]` placeholders (the frontend deploy fails without it until then). Delete it once the details are filled in (docs/LAUNCH-READINESS.md) |
 
 To redeploy without a new commit: Actions → Deploy → **Run workflow**.
 
@@ -321,7 +326,9 @@ To redeploy without a new commit: Actions → Deploy → **Run workflow**.
   - The consent screen needs the home, privacy and terms URLs on its Branding page before **Publish app**.
 
 ## 15. Go live
-1. Add Razorpay **test** keys (§8, §10) and deploy. This stack is your staging until launch.
+1. Add Razorpay **test** keys and the test webhook secret (§8, §10) and deploy with `APP_ENV=staging`: this stack is
+   your staging until launch, and `production` refuses test keys (and `staging` refuses live ones), so test money
+   and real money can't be mixed up. Everything else the startup check requires is the same for both.
 2. Run through it end to end:
    - sign up and get the verification email;
    - book, pay with a test card, get the confirmation email, and confirm the webhook shows up in the logs;
@@ -329,7 +336,8 @@ To redeploy without a new commit: Actions → Deploy → **Run workflow**.
    - hammer `/api/auth/login` until it returns 429.
 3. Finish `frontend/src/lib/business.ts` (address, support phone, grievance officer), have the Terms and Privacy
    pages reviewed, then submit the site to Razorpay.
-4. Swap in the live keys and the live webhook secret, then redeploy (ECS → Update service → Force new deployment).
+4. Swap in the live keys and the live webhook secret **and** set `APP_ENV=production` in the same task-definition
+   revision, then deploy it. A start with mismatched keys and environment fails before serving and the old task stays.
 5. Make a real ₹1 test departure, book it, then cancel and refund it.
 
 ## 16. Operating it

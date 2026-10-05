@@ -17,7 +17,7 @@
 - Routes: `/api/public/**`, `/api/auth/**`, `/api/account/**`, `/api/{trekker,guide,admin}/**` (role-guarded), `/api/webhooks/**` (signature-verified, no JWT).
 - Audit-worthy state changes (publish, cancel, refunds, payouts) write to `AuditLog`.
 - Background work is `@Scheduled` only: row locks, one transaction per row.
-- Config goes through `@ConfigurationProperties` records in `common/config`; every env var is listed in `.env.example`. Never commit secrets.
+- Config goes through `@ConfigurationProperties` records in `common/config`; every env var is listed in `.env.example` and `docs/ENVIRONMENT.md`. Deployed environments (`APP_ENV` staging/production) refuse development defaults at startup (`DeploymentGuard`): a new required variable gets a rule there. Never commit secrets.
 - Tests: JUnit 5 + MockMvc + Testcontainers (real Postgres, never H2). `cd backend && ./mvnw test` needs Docker.
 
 ## Product laws (TRD §5) — encode as DB constraint where possible, else service + test
