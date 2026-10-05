@@ -17,6 +17,7 @@ import {
   VisionPage,
 } from './pages/InfoPages.tsx'
 import { NotFoundPage } from './pages/NotFoundPage.tsx'
+import { RouteErrorPage } from './pages/RouteErrorPage.tsx'
 import { TreksPage } from './pages/TreksPage.tsx'
 import { TrekPage } from './pages/TrekPage.tsx'
 
@@ -35,6 +36,8 @@ function page<K extends string>(load: () => Promise<Record<K, ComponentType>>, n
 export const router = createBrowserRouter([
   {
     element: <Layout />,
+    // A page that throws while rendering, or whose code can't be loaded, shows this instead of a blank screen.
+    errorElement: <RouteErrorPage />,
     // A direct visit to a lazy page renders nothing for the moment its code takes to arrive.
     HydrateFallback: () => null,
     children: [

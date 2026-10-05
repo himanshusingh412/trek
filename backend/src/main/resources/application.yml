@@ -32,8 +32,22 @@ server:
   # Behind CloudFront/ALB: trust X-Forwarded-* so client IPs (rate limits) and https are real.
   forward-headers-strategy: framework
   shutdown: graceful
+  # Spring's defaults, stated so nobody turns them on: errors never echo messages, bindings or stack traces.
+  error:
+    include-message: never
+    include-binding-errors: never
+    include-stacktrace: never
+    include-exception: false
+
+logging:
+  pattern:
+    # Every line carries the request id (common/web/RequestIdFilter), also returned in X-Request-Id.
+    level: "%5p [%X{request_id:-}]"
 
 app:
+  # development (default) | staging | production. Deployed values refuse dev defaults at startup
+  # (common/config/DeploymentGuard, docs/ENVIRONMENT.md).
+  environment: ${APP_ENV:development}
   # Base URL the API is reachable at from browsers (builds avatar_url).
   public-base-url: ${PUBLIC_BASE_URL:http://localhost:8081}
   # Where email links point.
@@ -56,6 +70,7 @@ app:
     cookie-secure: ${AUTH_COOKIE_SECURE:false}
     google-client-id: ${GOOGLE_CLIENT_ID:}
   sms:
+    # log (dev: codes printed) | msg91 | disabled (deployed, until SMS delivers: OTP requests answer 503)
     provider: ${SMS_PROVIDER:log}
     msg91-auth-key: ${MSG91_AUTH_KEY:}
     msg91-otp-template-id: ${MSG91_OTP_TEMPLATE_ID:}
@@ -113,6 +128,11 @@ management:
         include: health
   endpoint:
     health:
-      # /actuator/health/liveness and /readiness for the load balancer.
+      # /actuator/health/liveness (the process is up) and /readiness (it can also reach the database).
+      # Details are never shown: only {"status":"UP"} or DOWN.
+      show-details: never
       probes:
         enabled: true
+      group:
+        readiness:
+          include: readinessState,db

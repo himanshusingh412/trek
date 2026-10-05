@@ -2,13 +2,22 @@ package com.sahyatri.common.config;
 
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
-/** Deployment URLs, file storage and mail settings (`app.*`). Auth and CORS have their own records. */
+/**
+ * Environment, deployment URLs, file storage and mail settings (`app.*`). Auth and CORS have their own records.
+ *
+ * @param environment `APP_ENV`: development (default), staging or production
+ */
 @ConfigurationProperties("app")
 public record AppProperties(
+        AppEnvironment environment,
         String publicBaseUrl,
         String frontendBaseUrl,
         Storage storage,
         Mail mail) {
+
+    public AppProperties {
+        environment = environment == null ? AppEnvironment.DEVELOPMENT : environment;
+    }
 
     /**
      * @param type     {@code local} (dev) or {@code s3}

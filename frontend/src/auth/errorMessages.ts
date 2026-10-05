@@ -3,6 +3,13 @@ import { ApiError } from '../api/client.ts'
 /** Human wording for the error codes in docs/TRD.md §7.2 onwards. */
 const MESSAGES: Record<string, string> = {
   NETWORK_ERROR: "Can't reach the server. Check your connection and try again.",
+  // Any endpoint (common/exception/GlobalExceptionHandler)
+  INTERNAL_ERROR: 'Something went wrong on our side. Please try again.',
+  SERVICE_UNAVAILABLE: "We're having trouble right now. Please try again in a minute.",
+  UNKNOWN_ERROR: 'Something went wrong. Please try again.',
+  MALFORMED_REQUEST: 'Something about that request was off. Refresh the page and try again.',
+  CONFLICT: 'This changed just now. Refresh the page and try again.',
+  CONCURRENT_UPDATE: 'Someone else changed this at the same moment. Please try again.',
   EMAIL_ALREADY_REGISTERED: 'An account with this email already exists. Try signing in instead.',
   INVALID_CREDENTIALS: 'Email or password is incorrect.',
   ACCOUNT_DISABLED: 'This account has been disabled. Please contact support.',
@@ -54,10 +61,17 @@ const MESSAGES: Record<string, string> = {
   BOOKING_NOT_HELD: 'This booking is no longer waiting for payment.',
   BOOKING_NOT_PAYABLE: 'The seat hold has ended. Start a new booking to pay.',
   TRAVELLERS_LOCKED: "Traveller details can't be changed on this booking any more.",
+  TRAVELLERS_NEEDED: "Add everyone who's coming, with their insurance, before paying.",
+  ADDONS_LOCKED: "Add-ons can't be changed after payment.",
   BOOKING_NOT_CANCELLABLE: "This booking can't be cancelled.",
   PAYMENT_NOT_FOUND: "We couldn't find that payment.",
   PAYMENT_SIGNATURE_INVALID: "We couldn't verify the payment. If money left your account, it will be refunded.",
   GATEWAY_UNAVAILABLE: 'Payments are unavailable right now. Please try again in a few minutes.',
+  // Reviews (§7.14) and snow reports (§7.13)
+  REVIEW_NOT_ALLOWED: 'You can review your guide once the trek is completed.',
+  REVIEW_NOT_FOUND: "You haven't reviewed this trek yet.",
+  REPORT_NOT_FOUND: 'That report no longer exists.',
+  REPORT_HAS_PHOTO: 'This report already has a photo.',
 }
 
 export function messageFor(error: unknown): string {
@@ -74,7 +88,12 @@ export function messageFor(error: unknown): string {
       ? `That code is incorrect. ${left} ${left === 1 ? 'attempt' : 'attempts'} left.`
       : MESSAGES.OTP_INVALID
   }
-  return MESSAGES[error.code] ?? error.message
+  if (error.code === 'INTERNAL_ERROR') {
+    // The id leads support to the server log line (X-Request-Id); the first block is enough to search for.
+    const ref = error.details.request_id
+    return typeof ref === 'string' ? `${MESSAGES.INTERNAL_ERROR} Reference: ${ref.slice(0, 8)}` : MESSAGES.INTERNAL_ERROR
+  }
+  return MESSAGES[error.code] ?? (error.message || MESSAGES.UNKNOWN_ERROR)
 }
 
 /** Per-field messages from a 400 VALIDATION_FAILED body: { details: { fields: { email: "..." } } }. */

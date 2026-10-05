@@ -3,10 +3,11 @@ package com.sahyatri.common.mail;
 import com.sahyatri.common.config.AppProperties;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
-/** Dev transport (`MAIL_PROVIDER=log`): prints the message instead of sending it. */
+/** Dev transport (`MAIL_PROVIDER=log`): prints the message instead of sending it. Refuses to exist when deployed. */
 @Component
 @ConditionalOnProperty(name = "app.mail.provider", havingValue = "log", matchIfMissing = true)
 public class LoggingMailTransport implements MailTransport {
@@ -16,6 +17,10 @@ public class LoggingMailTransport implements MailTransport {
     private final String from;
 
     public LoggingMailTransport(AppProperties props) {
+        if (props.environment().isDeployed()) {
+            throw new IllegalStateException("MAIL_PROVIDER=log prints emails (with sign-in links) and only runs with "
+                    + "APP_ENV=development");
+        }
         this.from = props.mail().from();
     }
 

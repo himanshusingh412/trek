@@ -157,7 +157,8 @@ The Dockerfile's build stage runs on `--platform=$BUILDPLATFORM`. Emulating amd6
   | `AWS_REGION` | `ap-south-1` |
   | `MAIL_PROVIDER` | `ses` |
   | `MAIL_FROM` | `The Empty Valley <no-reply@theemptyvalley.com>` |
-  | `SMS_PROVIDER` | `log` until DLT is done, then `msg91` |
+  | `APP_ENV` | `production` (`staging` for a test-mode stack). Startup fails, listing what's missing or invalid, if any development default is still in place |
+  | `SMS_PROVIDER` | `disabled` until DLT is done, then `msg91`. `log` is refused when deployed: it writes OTP codes to CloudWatch |
   | `MSG91_OTP_TEMPLATE_ID` | from MSG91, once DLT is done |
   | `RATE_LIMIT_CLIENT_IP_HEADER` | `X-Forwarded-For` (`CloudFront-Viewer-Address` once on CloudFront) |
   | `ADMIN_EMAILS` | `vikhilesh2411@gmail.com` |
@@ -166,6 +167,9 @@ The Dockerfile's build stage runs on `--platform=$BUILDPLATFORM`. Emulating amd6
 - **Secrets** (`valueFrom`): `JWT_SECRET` from `emptyvalley/prod` and `DB_PASSWORD` from the RDS secret's `password`
   key. Once you have them, add `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`, `RAZORPAY_WEBHOOK_SECRET` and
   `MSG91_AUTH_KEY` from `emptyvalley/prod`.
+- **Rolling out `APP_ENV` (one-time):** set `APP_ENV=production` **and** `SMS_PROVIDER=disabled` in the same
+  new task-definition revision. Until `APP_ENV` is set, the instance runs as `development` and only logs a warning.
+  A start that fails the check exits before Flyway runs; the circuit breaker keeps the old task serving.
 - **Changing env:** create a new revision of the live task definition and update the service to it. CI copies the
   live revision on every deploy and swaps only the image, so env changes survive deploys.
 

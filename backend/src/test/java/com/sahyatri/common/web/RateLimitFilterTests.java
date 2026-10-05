@@ -86,6 +86,29 @@ class RateLimitFilterTests {
         assertThat(albFilter.clientIp(spoofed)).isEqualTo("6.6.6.6");
     }
 
+    @Test
+    void behindAlbKeepsIpv6AddressesWhole() {
+        RateLimitFilter albFilter = new RateLimitFilter(new RateLimitProperties(
+                true, "X-Forwarded-For", 100, List.of(), List.of()), clock);
+        MockHttpServletRequest first = new MockHttpServletRequest("POST", "/api/auth/login");
+        first.addHeader("X-Forwarded-For", "2401:4900:1c2a:5b3e::abcd");
+        MockHttpServletRequest second = new MockHttpServletRequest("POST", "/api/auth/login");
+        second.addHeader("X-Forwarded-For", "9.9.9.9, 2401:4900:1c2a:5b3e::1234");
+
+        assertThat(albFilter.clientIp(first)).isEqualTo("2401:4900:1c2a:5b3e::abcd");
+        assertThat(albFilter.clientIp(second)).isEqualTo("2401:4900:1c2a:5b3e::1234");
+    }
+
+    @Test
+    void stripsOnlyRealPorts() {
+        assertThat(RateLimitFilter.withoutPort("1.2.3.4", false)).isEqualTo("1.2.3.4");
+        assertThat(RateLimitFilter.withoutPort("1.2.3.4:443", false)).isEqualTo("1.2.3.4");
+        assertThat(RateLimitFilter.withoutPort("[2001:db8::1]:443", false)).isEqualTo("2001:db8::1");
+        assertThat(RateLimitFilter.withoutPort("2001:db8::1", false)).isEqualTo("2001:db8::1");
+        // CloudFront-Viewer-Address always carries a port, even after a bare IPv6 address.
+        assertThat(RateLimitFilter.withoutPort("2001:db8::1:46532", true)).isEqualTo("2001:db8::1");
+    }
+
     private MockHttpServletResponse call(String method, String path, String viewer) throws Exception {
         MockHttpServletRequest request = new MockHttpServletRequest(method, path);
         request.addHeader("CloudFront-Viewer-Address", viewer);

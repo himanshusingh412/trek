@@ -1,5 +1,6 @@
 package com.sahyatri.auth;
 
+import com.sahyatri.auth.sms.DisabledSmsSender;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.test.web.servlet.ResultActions;
@@ -80,6 +81,21 @@ class OtpFlowTests extends AuthTestSupport {
         request("+14155550123")
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.details.fields.phone").exists());
+    }
+
+    @Test
+    void disabledSmsAnswers503AndKeepsNoCode() throws Exception {
+        org.mockito.Mockito.doAnswer(call -> {
+            new DisabledSmsSender().sendOtp(call.getArgument(0), call.getArgument(1));
+            return null;
+        }).when(smsSender).sendOtp(org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.anyString());
+        String phone = uniquePhone();
+
+        request(phone)
+                .andExpect(status().isServiceUnavailable())
+                .andExpect(jsonPath("$.code").value("SMS_UNAVAILABLE"));
+        Integer stored = jdbc.queryForObject("SELECT count(*) FROM otp_challenges WHERE phone = ?", Integer.class, phone);
+        org.assertj.core.api.Assertions.assertThat(stored).isZero();
     }
 
     private ResultActions request(String phone) throws Exception {

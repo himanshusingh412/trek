@@ -1,0 +1,2 @@
+# Validates configuration before the database pool, Flyway or the web server start (docs/ENVIRONMENT.md).
+org.springframework.context.ApplicationListener=com.sahyatri.common.config.DeploymentGuard

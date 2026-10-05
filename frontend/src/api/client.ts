@@ -1,4 +1,6 @@
-const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8081'
+// Absolute API origin (the site and API are on different hosts), or '' when they share one origin. Only the dev
+// server falls back to the local backend; a production build without the variable fails (vite.config.ts).
+const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? (import.meta.env.DEV ? 'http://localhost:8081' : '')
 
 /** Mirrors the backend error body: {code, message, details}. */
 export class ApiError extends Error {
@@ -44,12 +46,13 @@ export async function apiFetch<T>(path: string, options: RequestOptions = {}): P
 
   const data = await response.json().catch(() => null)
   if (!response.ok) {
-    throw new ApiError(
-      response.status,
-      data?.code ?? 'UNKNOWN_ERROR',
-      data?.message ?? response.statusText,
-      data?.details ?? {},
-    )
+    if (typeof data?.code === 'string') {
+      throw new ApiError(response.status, data.code, data.message ?? '', data.details ?? {})
+    }
+    // Not our error body: a load balancer or proxy page (502/503/504 HTML) or an empty response.
+    throw response.status >= 500
+      ? new ApiError(response.status, 'SERVICE_UNAVAILABLE', 'The server is unavailable')
+      : new ApiError(response.status, 'UNKNOWN_ERROR', `Request failed (${response.status})`)
   }
   return data as T
 }

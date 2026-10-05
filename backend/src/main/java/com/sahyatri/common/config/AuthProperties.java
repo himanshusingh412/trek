@@ -19,8 +19,13 @@ public record AuthProperties(
             throw new IllegalStateException("app.auth.jwt-secret (JWT_SECRET) must be at least 32 bytes");
         }
         // Secure cookies mean a real HTTPS deployment: refuse the public dev default and the .env.example placeholder.
-        if (cookieSecure && (jwtSecret.startsWith("dev-only-") || jwtSecret.startsWith("change-me"))) {
+        if (cookieSecure && isPlaceholderSecret(jwtSecret)) {
             throw new IllegalStateException("JWT_SECRET is still the dev placeholder; set a random secret");
         }
+    }
+
+    /** The application.yml dev default or the .env.example placeholder. */
+    public static boolean isPlaceholderSecret(String jwtSecret) {
+        return jwtSecret.startsWith("dev-only-") || jwtSecret.startsWith("change-me");
     }
 }

@@ -102,12 +102,33 @@ public class RateLimitFilter extends OncePerRequestFilter {
                 // X-Forwarded-For behind the ALB is "<client-supplied>, ..., <client ip>": only the last entry,
                 // appended by the ALB, can be trusted.
                 value = value.substring(value.lastIndexOf(',') + 1).trim();
-                // CloudFront-Viewer-Address is "ip:port" (IPv6 too): strip the port.
-                int colon = value.lastIndexOf(':');
-                return colon > 0 ? value.substring(0, colon) : value;
+                return withoutPort(value, CLOUDFRONT_VIEWER_ADDRESS.equalsIgnoreCase(header));
             }
         }
         return request.getRemoteAddr();
+    }
+
+    static final String CLOUDFRONT_VIEWER_ADDRESS = "CloudFront-Viewer-Address";
+
+    /**
+     * "1.2.3.4:443" and "[2001:db8::1]:443" lose the port. A bare IPv6 address ("2001:db8::1", as X-Forwarded-For
+     * sends it) is left whole, or every client in its /112 would share one bucket. CloudFront-Viewer-Address
+     * always ends in ":port", so there the last colon is always the port.
+     */
+    static String withoutPort(String address, boolean alwaysHasPort) {
+        if (address.startsWith("[")) {
+            int close = address.indexOf(']');
+            return close > 0 ? address.substring(1, close) : address;
+        }
+        int first = address.indexOf(':');
+        int last = address.lastIndexOf(':');
+        if (first < 0) {
+            return address;
+        }
+        if (first == last || alwaysHasPort) {
+            return address.substring(0, last);
+        }
+        return address;
     }
 
     private static <T> List<T> orEmpty(List<T> list) {
